@@ -122,14 +122,54 @@ class AgentConfig(BaseModel):
 
 
 class AgentWorkflowInput(BaseModel):
-    """Placeholder for AgentWorkflowInput model – to be implemented in subtask 1.5."""
+    """Input payload supplied when starting an Agent execution workflow.
 
-    # TODO: include session_id, user_message, run_id, etc.
-    ...
+    Attributes
+    ----------
+    session_id: str
+        Unique identifier of the conversation session the run belongs to (UUID string).
+    user_message: Message
+        The latest user message that triggered this workflow execution.
+    run_id: str | None
+        Optional identifier of the run/Workflow execution. A UUID will be generated
+        client-side where appropriate (e.g. by the API server) and forwarded so the
+        Temporal workflow can adopt the same identifier.  Keeping the field optional
+        allows callers that do not care about controlling the ID to omit it and let
+        the system generate one downstream.
+    """
+
+    session_id: str = Field(..., description="Conversation session identifier (UUID string)")
+    user_message: Message = Field(..., description="Latest user message to process")
+    run_id: Optional[str] = Field(
+        default=None,
+        description="Optional identifier for the run/workflow. If omitted one will be generated downstream.",
+    )
 
 
 class AgentWorkflowOutput(BaseModel):
-    """Placeholder for AgentWorkflowOutput model – to be implemented in subtask 1.5."""
+    """Represents the final or intermediate result returned by an Agent workflow.
 
-    # TODO: include status, final_message etc.
-    ... 
+    Attributes
+    ----------
+    run_id: str
+        Identifier of the run/workflow this output relates to.
+    status: Literal["running", "completed", "errored", "cancelled"]
+        Current status of the workflow execution.
+    final_message: Message | None
+        If the workflow finished successfully, the assistant's final message.
+    error: str | None
+        Human-readable error string when *status* is "errored".
+    """
+
+    run_id: str = Field(..., description="Identifier of the run/workflow")
+    status: Literal["running", "completed", "errored", "cancelled"] = Field(
+        ..., description="Execution status of the workflow"
+    )
+    final_message: Optional[Message] = Field(
+        default=None,
+        description="Assistant's final message when execution succeeded (None until completed)",
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Error description if status == 'errored'",
+    ) 
