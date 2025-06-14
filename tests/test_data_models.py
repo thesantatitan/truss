@@ -3,7 +3,8 @@ import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import pytest
-from truss.data_models import Message, ToolCall, ToolCallResult, LLMConfig, AgentConfig
+from truss.data_models import Message, ToolCall, ToolCallResult, LLMConfig, AgentConfig, AgentMemory, AgentWorkflowInput, AgentWorkflowOutput
+from uuid import uuid4
 
 
 def test_message_serialization_roundtrip():
@@ -54,4 +55,36 @@ def test_agent_config_roundtrip():
 
 def test_invalid_llm_temperature_raises():
     with pytest.raises(ValueError):
-        LLMConfig(model_name="gpt-4", temperature=3.0) 
+        LLMConfig(model_name="gpt-4", temperature=3.0)
+
+
+def test_agent_memory_roundtrip():
+    msg1 = Message(role="user", content="Hi")
+    msg2 = Message(role="assistant", content="Hello")
+    memory = AgentMemory(messages=[msg1, msg2])
+    json_str = memory.model_dump_json()
+    parsed = AgentMemory.model_validate_json(json_str)
+    assert parsed == memory
+
+
+def test_agent_memory_requires_non_empty():
+    with pytest.raises(ValueError):
+        AgentMemory(messages=[])
+
+
+def test_agent_workflow_input_roundtrip():
+    session_id = str(uuid4())
+    user_msg = Message(role="user", content="Hello")
+    awi = AgentWorkflowInput(session_id=session_id, user_message=user_msg, run_id=None)
+    json_str = awi.model_dump_json()
+    parsed = AgentWorkflowInput.model_validate_json(json_str)
+    assert parsed == awi
+
+
+def test_agent_workflow_output_roundtrip():
+    run_id = str(uuid4())
+    final_msg = Message(role="assistant", content="Done")
+    awo = AgentWorkflowOutput(run_id=run_id, status="completed", final_message=final_msg)
+    json_str = awo.model_dump_json()
+    parsed = AgentWorkflowOutput.model_validate_json(json_str)
+    assert parsed == awo 
