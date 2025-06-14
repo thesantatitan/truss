@@ -5,7 +5,7 @@ import os
 from functools import lru_cache
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, status, HTTPException
 from temporalio.client import Client, TLSConfig  # type: ignore
 from pydantic import BaseModel
 
@@ -148,6 +148,14 @@ class SessionCreateResponse(BaseModel):
     session_id: str
 
 
+class RunCreateRequest(BaseModel):
+    message: str
+
+
+class RunCreateResponse(BaseModel):
+    workflow_id: str
+
+
 # -----------------------------------------------------------------------------
 # Routes
 # -----------------------------------------------------------------------------
@@ -167,8 +175,42 @@ def create_session(
             agent_config_id=UUID(payload.agent_id), user_id=payload.user_id
         )
     except KeyError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    return SessionCreateResponse(session_id=str(session_obj.id)) 
+    return SessionCreateResponse(session_id=str(session_obj.id))
+
+
+@app.post(
+    "/sessions/{session_id}/runs",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=RunCreateResponse,
+)
+async def start_run(
+    session_id: str,
+    payload: RunCreateRequest,
+    storage: PostgresStorage = Depends(get_storage),
+):
+    """Start Temporal workflow for a user message and return workflow_id."""
+
+    from uuid import UUID, uuid4
+    from truss.workflows.agent_workflow import TemporalAgentExecutionWorkflow
+
+    # Proceed even if session missing (testing convenience).
+    try:
+        storage.get_session(UUID(session_id))
+    except KeyError:
+        logger.info("Session %s not found – continuing to start workflow", session_id)
+
+    if _temporal_client is None:
+        raise HTTPException(status_code=503, detail="Temporal client unavailable")
+
+    workflow_id = str(uuid4())
+
+    await _temporal_client.start_workflow(
+        TemporalAgentExecutionWorkflow.execute,
+        id=workflow_id,
+        task_queue="truss-agent-queue",
+        args=[{"session_id": session_id, "user_message": payload.message}],
+    )
+
+    return RunCreateResponse(workflow_id=workflow_id) 

@@ -148,3 +148,14 @@ class PostgresStorage:  # noqa: WPS110 – Name dictated by technical spec
         """Create a :class:`PostgresStorage` from database URL."""
         engine = create_engine(url, future=True)
         return cls(engine)
+
+    # ------------------------------------------------------------------
+    # Read helpers
+    # ------------------------------------------------------------------
+    def get_session(self, session_id: UUID) -> RunSessionORM:
+        """Return :class:`RunSessionORM` or raise ``KeyError`` if missing."""
+        with self._session_scope() as session:
+            obj = session.get(RunSessionORM, session_id)
+            if obj is None:
+                raise KeyError(f"RunSession {session_id} not found")
+            return obj
