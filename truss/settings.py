@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     temporal_port: int = 7233
     redis_url: str = "redis://localhost:6379/0"
 
-    # Pydantic-settings configuration ----------------------------------------------------
     model_config = SettingsConfigDict(
         env_prefix="TRUSS_",
         env_file=".env",
@@ -55,18 +54,11 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # ------------------------------------------------------------------
-    # Convenience helpers
-    # ------------------------------------------------------------------
     @property
     def temporal_url(self) -> str:
         """Return *host:port* string for connecting to the Temporal server."""
         return f"{self.temporal_host}:{self.temporal_port}"
 
-
-# ---------------------------------------------------------------------------
-# Public accessor (cached)
-# ---------------------------------------------------------------------------
 
 
 @functools.lru_cache(maxsize=1)

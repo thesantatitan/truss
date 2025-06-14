@@ -15,9 +15,6 @@ async def _dummy_stream() -> AsyncIterator[Dict[str, Any]]:  # noqa: D401 – he
 
 @pytest.mark.asyncio
 async def test_stream_completion_wrapper_sends_correct_params() -> None:
-    # ------------------------------------------------------------------
-    # Arrange – build minimal AgentConfig and conversation
-    # ------------------------------------------------------------------
     llm_cfg = LLMConfig(
         model_name="gpt-4o",
         temperature=0.3,
@@ -39,14 +36,9 @@ async def test_stream_completion_wrapper_sends_correct_params() -> None:
     with patch("truss.core.llm_client.litellm.acompletion", new=AsyncMock()) as mocked:
         mocked.return_value = _dummy_stream()
 
-        # ------------------------------------------------------------------
-        # Act – call wrapper
-        # ------------------------------------------------------------------
+
         stream = await stream_completion(agent_config=agent_cfg, conversation=conversation)
 
-        # ------------------------------------------------------------------
-        # Assert – correct params forwarded and we can iterate over stream
-        # ------------------------------------------------------------------
         mocked.assert_awaited_once()
         kwargs = mocked.call_args.kwargs
         assert kwargs["model"] == "gpt-4o"
@@ -55,7 +47,14 @@ async def test_stream_completion_wrapper_sends_correct_params() -> None:
         assert kwargs["top_p"] == 0.95
         assert kwargs["stream"] is True
         # Verify messages payload transformation
-        assert kwargs["messages"] == [{"role": "user", "content": "Say hello"}]
+        assert kwargs["messages"] == [
+            {
+                "role": "user",
+                "content": "Say hello",
+                "tool_calls": None,
+                "tool_call_id": None,
+            }
+        ]
 
         # Collect streamed chunks to ensure generator works
         collected = []

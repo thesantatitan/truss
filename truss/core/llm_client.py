@@ -36,6 +36,8 @@ def _build_messages_payload(messages: List[Message]) -> List[Dict[str, Any]]:
         payload.append({
             "role": msg.role,
             "content": msg.content or "",
+            "tool_calls": msg.tool_calls if msg.tool_calls else None,
+            "tool_call_id": msg.tool_call_id if msg.tool_call_id else None,
         })
     return payload
 
