@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from uuid import UUID
-from typing import List
+from typing import List, Dict, Any
 
 import anyio
 import redis.asyncio as redis
@@ -20,7 +20,7 @@ from anyio import to_thread
 
 from truss.core.llm_client import stream_completion
 from truss.core.storage import PostgresStorage
-from truss.data_models import AgentConfig, Message
+from truss.data_models import AgentConfig, Message, ToolCall
 from truss.settings import get_settings
 
 __all__ = [
@@ -76,8 +76,11 @@ async def llm_activity(
         # ------------------------------------------------------------------
         channel = f"stream:{session_id}"
         full_content: List[str] = []  # collect assistant text fragments
-        # TODO(tool-calls): Once we add tool calling support we will parse and
-        # accumulate ``tool_calls`` here.  For now we focus on plain content.
+
+        # Track partial tool call construction:
+        #   map tool_call_id -> {"name": str, "arguments": List[str]}
+        _tool_buffers: Dict[str, Dict[str, Any]] = {}
+        _tool_call_order: List[str] = []  # preserve order of first appearance
 
         # The final Message we'll return; initialised later to satisfy mypy.
         final_message: Message | None = None
@@ -101,16 +104,63 @@ async def llm_activity(
                 full_content.append(content_piece)
 
             # NOTE: Tool/function call accumulation will be handled in a future
-            # sub-task.  We simply ignore those fields for now.
+            # sub-task.  We add support for OpenAI-compatible streaming tool
+            # calls where the assistant emits "tool_calls": [ { id, type, function: { name, arguments } } ]
+
+            if (tool_calls_delta := delta.get("tool_calls")):
+                for tc in tool_calls_delta:  # each partial object
+                    tc_id: str = tc.get("id")  # should always be present
+                    if tc_id is None:  # pragma: no cover – guard
+                        continue
+
+                    if tc_id not in _tool_buffers:
+                        _tool_buffers[tc_id] = {"name": None, "arguments": []}
+                        _tool_call_order.append(tc_id)
+
+                    buf = _tool_buffers[tc_id]
+
+                    if func := tc.get("function"):
+                        # Name might be sent in the first chunk, but may repeat – ensure we keep first non-null
+                        if func.get("name"):
+                            buf["name"] = func["name"]
+
+                        # The arguments property may arrive in incremental chunks – append if present
+                        if (args_part := func.get("arguments")) is not None:
+                            buf["arguments"].append(args_part)
 
             # Emit a heartbeat so Temporal knows this activity is healthy even
             # during long-running streams.
-            activity.heartbeat()
+            try:
+                activity.heartbeat()
+            except RuntimeError:
+                # When running outside an activity context (e.g. plain unit
+                # tests) heartbeat() raises – safely ignore so local tests can
+                # exercise the logic without Temporal worker.
+                pass
 
         # ------------------------------------------------------------------
         # Build the final assistant Message once streaming completed
         # ------------------------------------------------------------------
-        final_message = Message(role="assistant", content="".join(full_content))
+        tool_calls_final: List[ToolCall] | None = None
+        if _tool_buffers:
+            from json import loads  # local import to avoid top-level cost
+
+            tool_calls_final = []
+            for tid in _tool_call_order:
+                buf = _tool_buffers[tid]
+                raw_args = "".join(buf["arguments"])
+                try:
+                    parsed_args = loads(raw_args) if raw_args else {}
+                except Exception:  # pragma: no cover – leave raw string if malformed
+                    parsed_args = {"raw": raw_args}
+
+                tool_calls_final.append(ToolCall(id=tid, name=buf["name"], arguments=parsed_args))
+
+        final_message = Message(
+            role="assistant",
+            content="".join(full_content) if full_content else None,
+            tool_calls=tool_calls_final,
+        )
 
         # ------------------------------------------------------------------
         # ATOMIC DURABILITY: Persist the *complete* message before returning
