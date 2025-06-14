@@ -56,7 +56,7 @@ class AgentMemory(BaseModel):
 
     messages: List[Message] = Field(
         ...,
-        min_items=1,
+        min_length=1,
         description="Ordered list of messages constituting the conversation memory (must contain at least one message)",
     )
 
@@ -67,17 +67,58 @@ class AgentMemory(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    """Placeholder for LLMConfig model – to be implemented in subtask 1.4."""
+    """Configuration options for the Large Language Model used by an agent."""
 
-    # TODO: include model_name, temperature, max_tokens, etc.
-    ...
+    model_name: str = Field(..., description="Identifier for the underlying LLM model, e.g. 'gpt-4o' or 'anthropic/claude-3'")
+    temperature: float = Field(
+        0.7,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature; higher values produce more diverse output",
+    )
+    max_tokens: Optional[int] = Field(
+        None,
+        gt=0,
+        description="Maximum number of tokens to generate in the completion (None means provider default)",
+    )
+    top_p: float = Field(
+        1.0,
+        ge=0.0,
+        le=1.0,
+        description="Nucleus sampling parameter; consider tokens with cumulative probability <= top_p",
+    )
+    frequency_penalty: float = Field(
+        0.0,
+        ge=0.0,
+        description="Penalises new tokens based on their existing frequency in text so far",
+    )
+    presence_penalty: float = Field(
+        0.0,
+        ge=0.0,
+        description="Penalises new tokens based on whether they appear in the text so far",
+    )
+
+    class Config:
+        frozen = True  # treat config as immutable so it can be hashed/cached
 
 
 class AgentConfig(BaseModel):
-    """Placeholder for AgentConfig model – to be implemented in subtask 1.4."""
+    """High-level configuration describing an autonomous agent instance."""
 
-    # TODO: include id, name, system_prompt, llm_config, tools
-    ...
+    id: str = Field(
+        default_factory=lambda: str(uuid4()),
+        description="Unique identifier for the agent configuration",
+    )
+    name: str = Field(..., min_length=1, description="Human-readable name for the agent")
+    system_prompt: str = Field(
+        ...,
+        description="System prompt that will be prepended to every conversation with this agent",
+    )
+    llm_config: LLMConfig = Field(..., description="Parameters controlling the underlying LLM")
+    tools: Optional[List[str]] = Field(
+        default=None,
+        description="List of tool names the agent is allowed to invoke (None means no tool calls)",
+    )
 
 
 class AgentWorkflowInput(BaseModel):
