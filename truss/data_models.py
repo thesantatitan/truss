@@ -8,6 +8,9 @@ subtasks will flesh out the individual models.
 
 
 from pydantic import BaseModel
+from typing import Any, Dict, List, Optional, Literal
+from uuid import uuid4
+from pydantic import Field
 
 __all__ = [
     "Message",
@@ -22,24 +25,30 @@ __all__ = [
 
 
 class Message(BaseModel):
-    """Placeholder for Message model – to be implemented in subtask 1.2."""
+    """A single chat message, optionally associated with tool calls or their results."""
 
-    # TODO: add fields `role`, `content`, `tool_calls`, `tool_call_id` etc.
-    ...
+    role: Literal["system", "user", "assistant", "tool"]
+    content: Optional[str] = None
+    tool_calls: Optional[List[ToolCall]] = None
+    tool_call_id: Optional[str] = Field(
+        default=None,
+        description="If this message is a tool response, reference to the originating tool call",
+    )
 
 
 class ToolCall(BaseModel):
-    """Placeholder for ToolCall model – to be implemented in subtask 1.2."""
+    """Represents a single tool invocation request coming from the LLM."""
 
-    # TODO: define name, arguments schema, etc.
-    ...
+    id: str = Field(default_factory=lambda: str(uuid4()), description="Unique identifier of the tool call within the assistant turn")
+    name: str = Field(..., description="Registered name of the tool/function to call")
+    arguments: Dict[str, Any] = Field(default_factory=dict, description="Raw JSON arguments payload passed to the tool")
 
 
 class ToolCallResult(BaseModel):
-    """Placeholder for ToolCallResult model – to be implemented in subtask 1.2."""
+    """Result payload returned by a tool execution."""
 
-    # TODO: define status, result, error, etc.
-    ...
+    tool_call_id: str = Field(..., description="Identifier linking this result to the originating ToolCall.id")
+    content: str | Dict[str, Any] = Field(..., description="Serialized result or message produced by the tool")
 
 
 class AgentMemory(BaseModel):
