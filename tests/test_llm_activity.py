@@ -8,6 +8,15 @@ import pytest
 from truss.activities.llm_activities import llm_activity
 from truss.data_models import AgentConfig, LLMConfig, Message
 
+# Stub PostgresStorage for tests to avoid hitting a real database
+
+
+class _DummyStorage:  # noqa: D101 – test helper
+    def create_run_step_from_message(self, run_id, message):  # noqa: D401
+        # Simply record that the method was called; could attach to self later if needed.
+        self.called_with = (run_id, message)
+        return None
+
 
 class _FakeRedis:  # noqa: D101 – test helper
     def __init__(self) -> None:  # noqa: D401
@@ -40,6 +49,7 @@ async def test_llm_activity_publishes_chunks_to_redis() -> None:  # noqa: D401 �
     with (
         patch("truss.activities.llm_activities._get_redis_client", new=AsyncMock(return_value=fake_redis)),
         patch("truss.activities.llm_activities.stream_completion", new=AsyncMock(return_value=_dummy_stream())),
+        patch("truss.activities.llm_activities.PostgresStorage.from_database_url", return_value=_DummyStorage()),
     ):
         await llm_activity(agent_cfg, msgs, session_id, run_id)  # type: ignore[arg-type]
 
