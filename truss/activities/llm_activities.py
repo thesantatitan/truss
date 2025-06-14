@@ -16,8 +16,10 @@ from typing import List
 import anyio
 import redis.asyncio as redis
 from temporalio import activity
+from anyio import to_thread
 
 from truss.core.llm_client import stream_completion
+from truss.core.storage import PostgresStorage
 from truss.data_models import AgentConfig, Message
 from truss.settings import get_settings
 
@@ -105,6 +107,20 @@ async def llm_activity(
         # Build the final assistant Message once streaming completed
         # ------------------------------------------------------------------
         final_message = Message(role="assistant", content="".join(full_content))
+
+        # ------------------------------------------------------------------
+        # ATOMIC DURABILITY: Persist the *complete* message before returning
+        # ------------------------------------------------------------------
+        storage = PostgresStorage.from_database_url(get_settings().database_url)
+
+        # Off-load the blocking DB write to a worker thread so we don't block
+        # the event-loop inside the activity runtime.
+        await to_thread.run_sync(
+            storage.create_run_step_from_message,
+            run_id,
+            final_message,
+            cancellable=True,
+        )
 
     finally:
         # Ensure the connection is closed even if streaming raises.
