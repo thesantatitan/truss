@@ -52,10 +52,18 @@ class ToolCallResult(BaseModel):
 
 
 class AgentMemory(BaseModel):
-    """Placeholder for AgentMemory model – to be implemented in subtask 1.3."""
+    """Represents an ordered collection of chat messages that make up an agent's conversation memory."""
 
-    # TODO: include messages: List[Message]
-    ...
+    messages: List[Message] = Field(
+        ...,
+        min_items=1,
+        description="Ordered list of messages constituting the conversation memory (must contain at least one message)",
+    )
+
+    def add_message(self, message: Message) -> None:
+        """Append a new message to the memory preserving order."""
+
+        self.messages.append(message)
 
 
 class LLMConfig(BaseModel):
