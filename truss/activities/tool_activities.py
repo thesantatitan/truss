@@ -65,9 +65,49 @@ async def _execute_web_search(query: str, page: int | None = 1) -> Dict[str, Any
 
 
 async def _execute_get_stock_price(ticker_symbol: str) -> Dict[str, Any]:  # noqa: D401
-    """Dummy financial lookup – returns a placeholder price until implemented."""
+    """Return the latest stock price for *ticker_symbol*.
 
-    return {"ticker": ticker_symbol.upper(), "price": None}
+    Uses the *Alpha Vantage* REST API when the ``ALPHAVANTAGE_API_KEY`` environment
+    variable is present.  Otherwise a deterministic stub is returned so tests and
+    offline development keep working without network access.
+    """
+
+    api_key = os.getenv("ALPHAVANTAGE_API_KEY")
+
+    # Stub path when no key configured -------------------------------------------------
+    if not api_key:
+        return {
+            "ticker": ticker_symbol.upper(),
+            "price": None,
+            "source": "stub",
+        }
+
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "GLOBAL_QUOTE",
+        "symbol": ticker_symbol.upper(),
+        "apikey": api_key,
+    }
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+
+        data: Dict[str, Any] = response.json()
+
+    quote: Dict[str, Any] = data.get("Global Quote", {})
+    price_str: str | None = quote.get("05. price")
+
+    try:
+        price = float(price_str) if price_str is not None else None
+    except ValueError:  # pragma: no cover – unexpected API glitch
+        price = None
+
+    return {
+        "ticker": ticker_symbol.upper(),
+        "price": price,
+        "source": "alpha_vantage",
+    }
 
 
 # ---------------------------------------------------------------------------

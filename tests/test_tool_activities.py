@@ -6,6 +6,7 @@ from temporalio.exceptions import ApplicationError
 from truss.data_models import ToolCall
 from truss.activities.tool_activities import execute_tool_activity
 from truss.activities.tool_activities import _execute_web_search  # noqa: WPS450 – internal tool test
+from truss.activities.tool_activities import _execute_get_stock_price  # noqa: WPS450 – internal tool test
 
 
 @pytest.mark.asyncio
@@ -43,4 +44,16 @@ async def test_web_search_tool_stub_without_api_key(monkeypatch):
     result = await _execute_web_search("truss durable agents")
 
     assert "results" in result
-    assert result["results"][0]["title"].startswith("Stub result for") 
+    assert result["results"][0]["title"].startswith("Stub result for")
+
+
+@pytest.mark.asyncio
+async def test_get_stock_price_stub(monkeypatch):
+    """Stock price tool should return None price when API key absent."""
+
+    monkeypatch.delenv("ALPHAVANTAGE_API_KEY", raising=False)
+
+    result = await _execute_get_stock_price("TSLA")
+
+    assert result["ticker"] == "TSLA"
+    assert result["price"] is None 
