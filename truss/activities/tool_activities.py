@@ -10,6 +10,8 @@ unit-tests simple.
 
 import json
 from typing import Any, Awaitable, Callable, Dict, Mapping
+import os
+import httpx
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -20,12 +22,46 @@ from truss.data_models import ToolCall, ToolCallResult
 # ---------------------------------------------------------------------------
 # Tool implementation stubs
 # ---------------------------------------------------------------------------
-async def _execute_web_search(query: str) -> Dict[str, Any]:  # noqa: D401 – imperative
+async def _execute_web_search(query: str, page: int | None = 1) -> Dict[str, Any]:  # noqa: D401 – imperative
     """Dummy implementation that will call a real search API in later tasks."""
 
-    # In a future subtask we will call Serper/Google here.  Returning a static
-    # payload keeps the API contract intact for now.
-    return {"results": []}
+    api_key = os.getenv("SERPER_API_KEY") or os.getenv("GOOGLE_SEARCH_API_KEY")
+
+    # When no API key is configured we return a deterministic stub so the tool
+    # remains usable in offline/dev environments as mandated by the PRD.
+    if not api_key:
+        return {
+            "results": [
+                {
+                    "title": f"Stub result for '{query}' (page {page})",
+                    "link": "https://example.com",
+                    "snippet": "No SERPER_API_KEY configured – returning mock data.",
+                }
+            ]
+        }
+
+    # Serper.dev REST endpoint – documented at https://serper.dev
+    endpoint = "https://google.serper.dev/search"
+    headers = {"X-API-KEY": api_key}
+    payload = {"q": query, "page": page or 1}
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(endpoint, json=payload, headers=headers)
+        response.raise_for_status()
+
+        data: Dict[str, Any] = response.json()
+
+    # Normalise to a predictable subset for downstream consumption
+    return {
+        "results": [
+            {
+                "title": item.get("title"),
+                "link": item.get("link"),
+                "snippet": item.get("snippet"),
+            }
+            for item in data.get("organic", [])
+        ]
+    }
 
 
 async def _execute_get_stock_price(ticker_symbol: str) -> Dict[str, Any]:  # noqa: D401
