@@ -124,6 +124,23 @@ class PostgresStorage:  # noqa: WPS110 – Name dictated by technical spec
             )
 
     # ------------------------------------------------------------------
+    # Session helpers
+    # ------------------------------------------------------------------
+    def create_session(self, agent_config_id: UUID, user_id: str) -> RunSessionORM:
+        """Insert a new :class:`RunSessionORM` row and return the instance."""
+
+        # Validate agent exists – provides nicer error than FK violation.
+        with self._session_scope() as session:
+            if session.get(AgentConfigORM, agent_config_id) is None:
+                raise KeyError(f"AgentConfig {agent_config_id} not found")
+
+            session_obj = RunSessionORM(agent_config_id=agent_config_id, user_id=user_id)
+            session.add(session_obj)
+            session.flush()
+            session.refresh(session_obj)
+            return session_obj
+
+    # ------------------------------------------------------------------
     # Factory helper (optional)
     # ------------------------------------------------------------------
     @classmethod
