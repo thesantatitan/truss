@@ -16,6 +16,7 @@ async def test_workflow_initialisation_creates_run_and_step():
     # --- Fake activity implementations -------------------------------------------------
     created_run_ids: list[str] = []
     created_steps: list[tuple[str, Message]] = []
+    finalized: list[str] = []
 
     @activity.defn(name="CreateRun")
     async def fake_create_run(session_id):  # noqa: D401 – test stub
@@ -41,6 +42,10 @@ async def test_workflow_initialisation_creates_run_and_step():
         # workflow exits the reasoning loop after a single iteration.
         return Message(role="assistant", content="Hi", tool_calls=None)
 
+    @activity.defn(name="FinalizeRun")
+    async def fake_finalize_run(run_id, status, error_msg):  # noqa: D401
+        finalized.append(status)
+
     # -----------------------------------------------------------------------------------
     env = await WorkflowEnvironment.start_time_skipping()
 
@@ -53,6 +58,7 @@ async def test_workflow_initialisation_creates_run_and_step():
             fake_create_run_step,
             fake_get_run_memory,
             fake_llm_stream_publish,
+            fake_finalize_run,
         ],
     )
 
@@ -82,6 +88,9 @@ async def test_workflow_initialisation_creates_run_and_step():
     assert len(created_run_ids) == 1
     assert len(created_steps) == 1
     assert created_steps[0][0] == created_run_ids[0]
+
+    # FinalizeRun should have been called once with 'completed'
+    assert finalized == ["completed"]
 
     await env.shutdown() 
  

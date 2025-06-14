@@ -22,6 +22,7 @@ async def test_workflow_executes_tools_and_completes():
     # In-memory trackers ------------------------------------------------------
     created_steps: list[Message] = []
     execute_tool_called: list[str] = []
+    finalized: list[str] = []
 
     # ------------------------------------------------------------------
     # Activity stubs
@@ -59,6 +60,10 @@ async def test_workflow_executes_tools_and_completes():
         execute_tool_called.append(tool_call.name)
         return ToolCallResult(tool_call_id=tool_call.id, content="result")
 
+    @activity.defn(name="FinalizeRun")
+    async def fake_finalize_run(run_id, status, error_msg):  # noqa: D401
+        finalized.append(status)
+
     # ------------------------------------------------------------------
     env = await WorkflowEnvironment.start_time_skipping()
     worker = _worker.Worker(
@@ -71,6 +76,7 @@ async def test_workflow_executes_tools_and_completes():
             fake_get_run_memory,
             fake_llm_stream_publish,
             fake_execute_tool,
+            fake_finalize_run,
         ],
     )
 
@@ -94,5 +100,7 @@ async def test_workflow_executes_tools_and_completes():
 
     # A tool result message should have been persisted
     assert any(m.role == "tool" for m in created_steps)
+
+    assert finalized == ["completed"]
 
     await env.shutdown() 
