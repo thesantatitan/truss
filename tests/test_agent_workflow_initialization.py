@@ -34,7 +34,7 @@ async def test_workflow_initialisation_creates_run_and_step():
     @activity.defn(name="GetRunMemory")
     async def fake_get_run_memory(session_id):  # noqa: D401 – test stub
         # Return empty memory so the workflow treats next LLM call as first turn.
-        return AgentMemory(messages=[])
+        return AgentMemory(messages=[Message(role="user", content="hi")])
 
     @activity.defn(name="LLMStreamPublish")
     async def fake_llm_stream_publish(agent_config, messages, session_id, run_id):  # noqa: D401

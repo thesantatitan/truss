@@ -40,7 +40,7 @@ async def test_workflow_executes_tools_and_completes():
     async def fake_get_run_memory(session_id):
         # Return empty memory for simplicity – the workflow doesn't depend on
         # previous steps for this test scenario.
-        return AgentMemory(messages=[])
+        return AgentMemory(messages=[Message(role="user", content="hello")])
 
     # Provide two-phase LLM behaviour: first call returns tool_calls, second none
     _llm_call_counter = {"count": 0}
