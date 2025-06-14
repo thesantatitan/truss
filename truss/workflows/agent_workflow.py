@@ -15,7 +15,7 @@ from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 from temporalio.common import RetryPolicy
 
-from truss.data_models import AgentWorkflowInput, AgentWorkflowOutput, Message  # placeholders until full impl
+from truss.data_models import AgentWorkflowInput, AgentWorkflowOutput, Message, ToolCallResult  # placeholders until full impl
 
 
 @workflow.defn
@@ -159,14 +159,43 @@ class TemporalAgentExecutionWorkflow:  # noqa: WPS110 – name specified in HLD/
                     final_message=assistant_response,
                 )
 
-            # The assistant requested tool execution – this will be implemented
-            # in the next sub-task.  For now we abort with a non-retryable error
-            # so the workflow can be resumed after the feature lands.
-            raise ApplicationError(
-                "Tool call execution not yet implemented",
-                type="NotImplemented",
-                non_retryable=True,
-            )
+            # --------------------------------------------------------------
+            # 4.4 Execute requested tools in *parallel*
+            # --------------------------------------------------------------
+            import asyncio  # local import to keep top-level clean & deterministic
+
+            if assistant_response.tool_calls is None:  # pragma: no cover – safety guard
+                # Should not happen due to check above, but keep workflow safe.
+                continue
+
+            self.current_status = f"executing {len(assistant_response.tool_calls)} tools"
+
+            tool_tasks = [
+                workflow.execute_activity(
+                    "ExecuteTool",
+                    args=[tool_call],
+                    start_to_close_timeout=timedelta(minutes=1),
+                    retry_policy=default_retry,
+                )
+                for tool_call in assistant_response.tool_calls
+            ]
+
+            tool_results: list[ToolCallResult] = list(await asyncio.gather(*tool_tasks))
+
+            # --------------------------------------------------------------
+            # 4.5 Persist tool results as *tool* role RunSteps
+            # --------------------------------------------------------------
+            for res in tool_results:
+                tool_msg = Message(role="tool", content=res.content, tool_call_id=res.tool_call_id)
+
+                await workflow.execute_activity(
+                    "CreateRunStep",
+                    args=[run_id, tool_msg],
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=default_retry,
+                )
+
+            # Loop continues – with new memory containing tool results added
 
         # This line is unreachable but keeps the type-checker happy.
         # pragma: no cover
