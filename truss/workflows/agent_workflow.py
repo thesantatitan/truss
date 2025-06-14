@@ -15,7 +15,7 @@ from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 from temporalio.common import RetryPolicy
 
-from truss.data_models import AgentWorkflowInput, AgentWorkflowOutput  # placeholders until full impl
+from truss.data_models import AgentWorkflowInput, AgentWorkflowOutput, Message  # placeholders until full impl
 
 
 @workflow.defn
@@ -100,12 +100,74 @@ class TemporalAgentExecutionWorkflow:  # noqa: WPS110 – name specified in HLD/
         # Store run identifier for later workflow steps
         self._run_id = str(run_id)
 
-        # For now, mark status and short-circuit further processing.
-        self.current_status = "initialised"
+        # ------------------------------------------------------------------
+        # 4. Main reasoning loop – delegate heavy lifting to activities
+        # ------------------------------------------------------------------
+        # NOTE: For now we do **not** load the AgentConfig because the session ->
+        # agent mapping activity has not yet been implemented (future sub-task).
+        # We simply forward ``None`` which is accepted by the stubbed
+        # ``LLMStreamPublish`` activity used in unit-tests.  A real implementation
+        # will supply the actual AgentConfig instance.
+        agent_config = None  # type: ignore[assignment]
 
-        # Workflow not fully implemented – raise to stop execution without retry
-        raise ApplicationError(
-            "TemporalAgentExecutionWorkflow.execute – reasoning loop not yet implemented",
-            type="NotImplemented",
-            non_retryable=True,
-        ) 
+        self.current_status = "thinking"
+
+        while True:
+            # --------------------------------------------------------------
+            # Cancellation check – honour external signal requests
+            # --------------------------------------------------------------
+            if self.cancellation_requested:
+                raise ApplicationError("Workflow cancelled via signal", non_retryable=True)
+
+            # --------------------------------------------------------------
+            # 4.1 Fetch conversation memory for this session
+            # --------------------------------------------------------------
+            memory = await workflow.execute_activity(
+                "GetRunMemory",
+                args=[session_uuid],
+                start_to_close_timeout=timedelta(seconds=15),
+                retry_policy=default_retry,
+            )
+
+            # Construct prompt – prepend system prompt if we have one
+            messages_for_llm: list[Message] = []
+            if agent_config is not None and getattr(agent_config, "system_prompt", None):
+                messages_for_llm.append(
+                    Message(role="system", content=getattr(agent_config, "system_prompt"))
+                )
+            messages_for_llm.extend(memory.messages)  # type: ignore[arg-type]
+
+            # --------------------------------------------------------------
+            # 4.2 Invoke LLM activity with streaming & durability guarantees
+            # --------------------------------------------------------------
+            assistant_response = await workflow.execute_activity(
+                "LLMStreamPublish",
+                args=[agent_config, messages_for_llm, session_uuid, run_id],
+                start_to_close_timeout=timedelta(minutes=3),
+                retry_policy=RetryPolicy(maximum_attempts=5),
+            )
+
+            # --------------------------------------------------------------
+            # 4.3 Decision – final response vs tool delegation
+            # --------------------------------------------------------------
+            if not assistant_response.tool_calls:
+                # No tool calls requested → finished.
+                self.current_status = "completed"
+                return AgentWorkflowOutput(
+                    run_id=run_id,
+                    status="completed",
+                    final_message=assistant_response,
+                )
+
+            # The assistant requested tool execution – this will be implemented
+            # in the next sub-task.  For now we abort with a non-retryable error
+            # so the workflow can be resumed after the feature lands.
+            raise ApplicationError(
+                "Tool call execution not yet implemented",
+                type="NotImplemented",
+                non_retryable=True,
+            )
+
+        # This line is unreachable but keeps the type-checker happy.
+        # pragma: no cover
+        return AgentWorkflowOutput(run_id=run_id, status="failed") 
