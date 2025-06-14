@@ -41,7 +41,7 @@ async def llm_activity(
     messages: List[Message],
     session_id: UUID,
     run_id: UUID,  # noqa: D401 – part of stable signature, unused for now
-) -> None:  # noqa: D401 – imperative docstring handled by module
+) -> Message:  # noqa: D401 – imperative docstring handled by module
     """Stream assistant response and publish each raw chunk to Redis.
 
     This *Temporal activity* performs the following high-level steps:
@@ -52,8 +52,10 @@ async def llm_activity(
        JSON data to Redis channel ``stream:{session_id}`` for consumption by
        real-time clients.
 
-    Down-stream improvements (accumulation, persistence, heartbeats) will be
-    addressed by subsequent subtasks – keeping commits small and focused.
+    This implementation **extends** the previous streaming-only version by
+    *accumulating* the provider deltas into a **complete** :class:`Message`
+    instance which is returned to the workflow after streaming finishes.  The
+    atomic persistence step will be introduced in the next sub-task.
     """
 
     # ------------------------------------------------------------------
@@ -71,10 +73,38 @@ async def llm_activity(
         # Forward chunks to Redis in *real time*
         # ------------------------------------------------------------------
         channel = f"stream:{session_id}"
+        full_content: List[str] = []  # collect assistant text fragments
+        # TODO(tool-calls): Once we add tool calling support we will parse and
+        # accumulate ``tool_calls`` here.  For now we focus on plain content.
+
+        # The final Message we'll return; initialised later to satisfy mypy.
+        final_message: Message | None = None
+
         async for chunk in chunk_stream:  # type: Dict[str, Any]
-            # Publish the provider chunk as a JSON-encoded string so clients can
-            # parse it easily irrespective of Redis serialization.
+            # Publish raw chunk for real-time UI
             await redis_client.publish(channel, json.dumps(chunk))
+
+            # ------------------------------------------------------------------
+            # Accumulate textual deltas for the final assistant message
+            # ------------------------------------------------------------------
+            try:
+                delta = chunk["choices"][0]["delta"]
+            except (KeyError, IndexError, TypeError):  # pragma: no cover – guard against provider shape changes
+                activity.logger.warning("Unexpected chunk shape encountered while accumulating content: %s", chunk)
+                continue
+
+            # LiteLLM normalises OpenAI-style streaming payloads where text is
+            # provided in the ``content`` field.
+            if (content_piece := delta.get("content")):
+                full_content.append(content_piece)
+
+            # NOTE: Tool/function call accumulation will be handled in a future
+            # sub-task.  We simply ignore those fields for now.
+
+        # ------------------------------------------------------------------
+        # Build the final assistant Message once streaming completed
+        # ------------------------------------------------------------------
+        final_message = Message(role="assistant", content="".join(full_content))
 
     finally:
         # Ensure the connection is closed even if streaming raises.
@@ -84,4 +114,14 @@ async def llm_activity(
             try:
                 await redis_client.aclose()
             except Exception:  # pragma: no cover
-                activity.logger.warning("Failed to close Redis client", exc_info=True) 
+                activity.logger.warning("Failed to close Redis client", exc_info=True)
+
+    # Even if streaming raised an exception the finally block above will have
+    # executed – but ``final_message`` may still be *None*.  In that case we
+    # re-raise to let Temporal handle retries.  Otherwise we can safely return
+    # the accumulated response.
+
+    if final_message is None:
+        raise RuntimeError("LLM streaming did not yield any chunks – cannot build assistant message")
+
+    return final_message 
