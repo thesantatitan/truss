@@ -103,6 +103,10 @@ async def llm_activity(
             # NOTE: Tool/function call accumulation will be handled in a future
             # sub-task.  We simply ignore those fields for now.
 
+            # Emit a heartbeat so Temporal knows this activity is healthy even
+            # during long-running streams.
+            activity.heartbeat()
+
         # ------------------------------------------------------------------
         # Build the final assistant Message once streaming completed
         # ------------------------------------------------------------------
