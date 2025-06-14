@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Pydantic data models used throughout the Truss runtime.
 
 Only skeleton class definitions are included in this first iteration.  Subsequent
@@ -7,6 +5,7 @@ subtasks will flesh out the individual models.
 """
 
 
+from __future__ import annotations
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional, Literal
 from uuid import uuid4
